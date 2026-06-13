@@ -12,6 +12,10 @@ using UnityEngine;
 using UnityEngine.UI;
 using Font = UnityEngine.Font;
 
+#if TextMeshPro
+using TMPro;
+#endif
+
 namespace DGame.PSD2UGUI
 {
     /// <summary>
@@ -32,6 +36,10 @@ namespace DGame.PSD2UGUI
         private Vector2 m_scroll;
         private int m_tabIndex;
         private static readonly string[] s_tabs = { "PSD转UI", "设置" };
+        private const string TextMeshProDefine = "TextMeshPro";
+#if TextMeshPro
+        private static readonly string[] s_textComponentTabs = { "Unity Text", "TextMeshPro" };
+#endif
 
         [MenuItem("Tools/UI/PSD转UI &h")]
         public static void Open()
@@ -126,6 +134,8 @@ namespace DGame.PSD2UGUI
             }
 
             EditorGUILayout.Space(10);
+            DrawTextComponentSwitch();
+
             if (!File.Exists(m_psdPath))
             {
                 EditorGUILayout.HelpBox("拖入或选择一个 .psd 文件", MessageType.Info);
@@ -156,6 +166,114 @@ namespace DGame.PSD2UGUI
                 }
             }
         }
+
+        private void DrawTextComponentSwitch()
+        {
+            var settings = PSD2UGUISettings.Instance;
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("文本组件", EditorStyles.boldLabel);
+
+            EditorGUI.BeginChangeCheck();
+#if TextMeshPro
+            int newType = GUILayout.Toolbar((int)settings.textComponentType, s_textComponentTabs, GUILayout.Height(24));
+#else
+            int newType = 0;
+            EditorGUILayout.HelpBox("当前未定义 TextMeshPro 编译符号，生成时将使用 Unity Text。", MessageType.Warning);
+            DrawAddTextMeshProDefineButton();
+#endif
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(settings, "Change PSD2UGUI Text Component");
+                settings.textComponentType = (PSD2UGUITextComponentType)newType;
+                EditorUtility.SetDirty(settings);
+                ComponentTypeResolver.ClearCache();
+                settings.ClearCache();
+            }
+
+#if TextMeshPro
+            string tip = settings.textComponentType == PSD2UGUITextComponentType.TextMeshPro
+                ? $"使用 {GetDisplayComponentName(settings.textMeshProComponentTypeName, typeof(TextMeshProUGUI))}，字体走 TMP_FontAsset 映射。"
+                : $"使用 {GetDisplayComponentName(settings.textComponentTypeName, typeof(Text))}，字体走 Unity Font 映射。";
+#else
+            string tip = $"使用 {GetDisplayComponentName(settings.textComponentTypeName, typeof(Text))}，字体走 Unity Font 映射。";
+#endif
+            EditorGUILayout.HelpBox(tip, MessageType.None);
+            EditorGUILayout.EndVertical();
+        }
+
+        private static string GetDisplayComponentName(string typeName, Type fallback)
+        {
+            return string.IsNullOrEmpty(typeName) ? fallback.FullName : typeName;
+        }
+
+#if !TextMeshPro
+        private static void DrawAddTextMeshProDefineButton()
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("自动添加 TextMeshPro 宏定义", GUILayout.Width(190)))
+            {
+                AddTextMeshProDefine();
+            }
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.HelpBox("添加后 Unity 会触发脚本重编译，完成后可切换到 TextMeshPro 生成。", MessageType.None);
+        }
+
+        private static void AddTextMeshProDefine()
+        {
+            if (!IsTextMeshProAvailable())
+            {
+                EditorUtility.DisplayDialog(
+                    "无法添加宏定义",
+                    "当前项目未检测到 TextMeshPro 程序集。请先通过 Package Manager 安装 com.unity.textmeshpro。",
+                    "确定");
+                return;
+            }
+
+            BuildTargetGroup group = EditorUserBuildSettings.selectedBuildTargetGroup;
+            if (group == BuildTargetGroup.Unknown)
+            {
+                EditorUtility.DisplayDialog("无法添加宏定义", "当前 BuildTargetGroup 无效，请先在 Build Settings 中选择目标平台。", "确定");
+                return;
+            }
+
+            string defines = PlayerSettings.GetScriptingDefineSymbolsForGroup(group);
+            if (HasDefine(defines, TextMeshProDefine))
+            {
+                EditorUtility.DisplayDialog("宏定义已存在", $"当前平台已包含 {TextMeshProDefine}。如果界面仍提示未定义，请等待 Unity 重编译完成。", "确定");
+                return;
+            }
+
+            string newDefines = string.IsNullOrEmpty(defines) ? TextMeshProDefine : $"{defines};{TextMeshProDefine}";
+            PlayerSettings.SetScriptingDefineSymbolsForGroup(group, newDefines);
+            AssetDatabase.SaveAssets();
+            Debug.Log($"[PSD2UGUI] 已为 {group} 添加 Scripting Define Symbol: {TextMeshProDefine}");
+        }
+
+        private static bool IsTextMeshProAvailable()
+        {
+            return Type.GetType("TMPro.TMP_Text, Unity.TextMeshPro") != null ||
+                   Type.GetType("TMPro.TextMeshProUGUI, Unity.TextMeshPro") != null;
+        }
+
+        private static bool HasDefine(string defines, string symbol)
+        {
+            if (string.IsNullOrEmpty(defines))
+            {
+                return false;
+            }
+
+            string[] splitDefines = defines.Split(';');
+            for (int i = 0; i < splitDefines.Length; i++)
+            {
+                if (string.Equals(splitDefines[i].Trim(), symbol, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+#endif
 
         private void ParsePSD()
         {
@@ -330,6 +448,22 @@ namespace DGame.PSD2UGUI
             if (m_onlySize || m_attr.uiType != UIType.Text) return;
 
             var settings = PSD2UGUISettings.Instance;
+#if TextMeshPro
+            if (settings.textComponentType == PSD2UGUITextComponentType.TextMeshPro)
+            {
+                SetTextMeshProData(go, settings);
+                return;
+            }
+#endif
+
+            SetUnityTextData(go, settings);
+        }
+
+        private void SetUnityTextData(GameObject go, PSD2UGUISettings settings)
+        {
+#if TextMeshPro
+            RemoveComponents<TMP_Text>(go);
+#endif
             var textType = ComponentTypeResolver.Resolve(settings.textComponentTypeName, typeof(Text));
             var text = GetOrAddComponentByType(go, textType) as Text;
             if (text == null)
@@ -372,6 +506,172 @@ namespace DGame.PSD2UGUI
             if (m_attr.shadow)
             {
                 ApplyShadow(go, m_attr.shadowColor, m_attr.shadowDis);
+            }
+        }
+
+#if TextMeshPro
+        private void SetTextMeshProData(GameObject go, PSD2UGUISettings settings)
+        {
+            RemoveComponents<Text>(go);
+
+            var tmpType = ComponentTypeResolver.Resolve(settings.textMeshProComponentTypeName, typeof(TextMeshProUGUI));
+            var text = GetOrAddComponentByType(go, tmpType) as TMP_Text;
+            if (text == null)
+            {
+                Debug.LogError($"[PSD2UGUI] TextMeshPro 组件类型 {settings.textMeshProComponentTypeName} 不是 TMP_Text 派生类");
+                return;
+            }
+
+            string fontAssetPath = settings.GetTmpFontAssetPath(m_attr.fontName);
+            if (!string.IsNullOrEmpty(fontAssetPath))
+            {
+                var fontAsset = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(fontAssetPath);
+                if (fontAsset != null)
+                {
+                    text.font = fontAsset;
+                }
+            }
+
+            text.fontStyle = ConvertToTmpFontStyle(m_attr.fontStyle);
+            text.fontSize = m_attr.fontSize;
+            text.color = m_attr.color;
+            text.raycastTarget = false;
+
+            if (!m_notText)
+            {
+                text.overflowMode = TextOverflowModes.Overflow;
+                text.enableWordWrapping = false;
+                text.alignment = ConvertToTmpAlignment(m_attr.alignType);
+                text.text = m_attr.textStr;
+            }
+
+            ApplyTextMeshProGradient(text);
+
+            if (m_attr.outline)
+            {
+                ApplyTextMeshProOutline(text, m_attr.outlineColor, m_attr.outlineSize);
+            }
+            if (m_attr.shadow)
+            {
+                ApplyTextMeshProShadow(text, m_attr.shadowColor, m_attr.shadowDis);
+            }
+        }
+
+        private static FontStyles ConvertToTmpFontStyle(FontStyle fontStyle)
+        {
+            switch (fontStyle)
+            {
+                case FontStyle.Bold:
+                    return FontStyles.Bold;
+                case FontStyle.Italic:
+                    return FontStyles.Italic;
+                case FontStyle.BoldAndItalic:
+                    return FontStyles.Bold | FontStyles.Italic;
+                default:
+                    return FontStyles.Normal;
+            }
+        }
+
+        private static TextAlignmentOptions ConvertToTmpAlignment(FontAlignType alignType)
+        {
+            switch (alignType)
+            {
+                case FontAlignType.Left:
+                    return TextAlignmentOptions.MidlineLeft;
+                case FontAlignType.Right:
+                    return TextAlignmentOptions.MidlineRight;
+                default:
+                    return TextAlignmentOptions.Midline;
+            }
+        }
+
+        private void ApplyTextMeshProGradient(TMP_Text text)
+        {
+            if (text == null || m_attr.gradient == null || m_attr.gradient.Count == 0)
+            {
+                return;
+            }
+
+            Color a = m_attr.gradient[0];
+            Color b = m_attr.gradient[Mathf.Min(1, m_attr.gradient.Count - 1)];
+            ResolveGradientDirection(a, b, m_attr.gradientAngle, out var top, out var bottom, out var left, out var right);
+            text.enableVertexGradient = true;
+            bool horizontal = m_attr.gradientAngle == 0 || Mathf.Abs(m_attr.gradientAngle) == 180;
+            Color topLeft = horizontal ? left : top;
+            Color topRight = horizontal ? right : top;
+            Color bottomLeft = horizontal ? left : bottom;
+            Color bottomRight = horizontal ? right : bottom;
+            text.colorGradient = new VertexGradient(topLeft, topRight, bottomLeft, bottomRight);
+        }
+
+        private void ApplyTextMeshProOutline(TMP_Text text, Color color, int size)
+        {
+            if (text == null)
+            {
+                return;
+            }
+
+            text.outlineColor = color;
+            text.outlineWidth = Mathf.Clamp(size / Mathf.Max(1f, m_attr.fontSize), 0f, 1f);
+
+            var material = text.fontMaterial;
+            if (material == null)
+            {
+                return;
+            }
+
+            material.EnableKeyword(ShaderUtilities.Keyword_Outline);
+            SetMaterialColor(material, "_OutlineColor", color);
+            SetMaterialFloat(material, "_OutlineWidth", text.outlineWidth);
+            text.fontMaterial = material;
+        }
+
+        private void ApplyTextMeshProShadow(TMP_Text text, Color color, Vector2 dis)
+        {
+            if (text == null)
+            {
+                return;
+            }
+
+            var material = text.fontMaterial;
+            if (material == null)
+            {
+                return;
+            }
+
+            float scale = Mathf.Max(1f, m_attr.fontSize);
+            material.EnableKeyword("UNDERLAY_ON");
+            SetMaterialColor(material, "_UnderlayColor", color);
+            SetMaterialFloat(material, "_UnderlayOffsetX", Mathf.Clamp(dis.x / scale, -1f, 1f));
+            SetMaterialFloat(material, "_UnderlayOffsetY", Mathf.Clamp(dis.y / scale, -1f, 1f));
+            SetMaterialFloat(material, "_UnderlaySoftness", 0f);
+            SetMaterialFloat(material, "_UnderlayDilate", 0f);
+            text.fontMaterial = material;
+        }
+
+        private static void SetMaterialColor(Material material, string propertyName, Color value)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetColor(propertyName, value);
+            }
+        }
+
+        private static void SetMaterialFloat(Material material, string propertyName, float value)
+        {
+            if (material.HasProperty(propertyName))
+            {
+                material.SetFloat(propertyName, value);
+            }
+        }
+#endif
+
+        private void RemoveComponents<T>(GameObject go) where T : Component
+        {
+            var components = go.GetComponents<T>();
+            foreach (var component in components)
+            {
+                DestroyImmediate(component);
             }
         }
 
