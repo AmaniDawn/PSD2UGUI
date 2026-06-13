@@ -178,7 +178,7 @@ namespace DGame.PSD2UGUI
             int newType = GUILayout.Toolbar((int)settings.textComponentType, s_textComponentTabs, GUILayout.Height(24));
 #else
             int newType = 0;
-            EditorGUILayout.HelpBox("当前未定义 TextMeshPro 编译符号，生成时将使用 Unity Text。", MessageType.Warning);
+            EditorGUILayout.HelpBox($"当前未定义 TextMeshPro 编译符号，生成时将使用 {GetDisplayComponentName(settings.textComponentTypeName, typeof(Text))}。如果需要支持 TextMeshPro，点击下方添加按钮。", MessageType.Warning);
             DrawAddTextMeshProDefineButton();
 #endif
             if (EditorGUI.EndChangeCheck())
