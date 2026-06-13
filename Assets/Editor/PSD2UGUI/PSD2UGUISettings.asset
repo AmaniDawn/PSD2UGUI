@@ -13,9 +13,9 @@ MonoBehaviour:
   m_Name: PSD2UGUISettings
   m_EditorClassIdentifier: 
   resolution: {x: 750, y: 1334}
-  textComponentType: 0
+  textComponentType: 2
   textComponentTypeName: 
-  textMeshProComponentTypeName: TMPro.TextMeshProUGUI
+  uniTextComponentTypeName: LightSide.UniText
   imageComponentTypeName: 
   buttonComponentTypeName: 
   rawImageComponentTypeName: 
@@ -28,6 +28,5 @@ MonoBehaviour:
   - Assets/BundleAssets/UIRaw/Raw
   defaultFontPath: Assets/BundleAssets/Fonts/SmileySans.ttf
   fontPaths: []
-  defaultTmpFontAssetPath: Assets/TextMesh Pro/Resources/Fonts & Materials/LiberationSans
-    SDF.asset
-  tmpFontAssetPaths: []
+  defaultUniTextFontAssetPath: 
+  uniTextFontAssetPaths: []
